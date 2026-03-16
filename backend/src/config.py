@@ -128,3 +128,4 @@ class Settings(BaseSettings):
     MCP_SERVERS_CONFIG_PATH: str = "/app/mcp_servers.json"  # MCP servers config file path
 
 settings = Settings()
+# Backend Configuration
