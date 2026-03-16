@@ -39,4 +39,4 @@ class User(Base, SQLAlchemyBaseUserTableUUID):
         "RefreshToken",
         back_populates="user",
         cascade="all, delete-orphan"
-    )
+    )# User models
