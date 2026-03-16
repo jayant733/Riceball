@@ -1,0 +1,143 @@
+import logging
+from typing import Dict, Any, List, Optional
+
+from langchain_chroma import Chroma
+from langchain_core.embeddings import Embeddings
+from langchain_core.documents import Document as VectorDocument
+from langchain_core.vectorstores import VectorStoreRetriever
+
+from src.config import settings, ChromaClientType
+
+
+logger = logging.getLogger(__name__)
+
+
+class ChromaVectorStore:
+    """Encapsulate Chroma vector store operations"""
+
+    def __init__(self) -> None:
+        self.host = settings.CHROMA_SERVER_HOST
+        self.port = settings.CHROMA_SERVER_PORT
+        self.client_type = settings.CHROMA_CLIENT_TYPE
+        self.persist_directory = str(settings.CHROMA_PERSIST_DIRECTORY or (settings.STORAGE_DIR / "chroma_db"))
+
+
+    def _get_collection(
+        self,
+        collection_name: str,
+        embedding_function: Optional[Embeddings] = None,
+    ) -> Chroma:
+        kwargs: Dict[str, Any] = {
+            "collection_name": collection_name,
+        }
+        
+        if self.client_type == ChromaClientType.PERSISTENT:
+            kwargs["persist_directory"] = self.persist_directory
+        else:
+            kwargs["host"] = self.host
+            kwargs["port"] = self.port
+            
+        if embedding_function is not None:
+            kwargs["embedding_function"] = embedding_function
+
+        return Chroma(**kwargs)
+    
+
+    async def get_retriever(
+        self,
+        collection_name: str,
+        embedding_function: Embeddings,
+        **kwargs: Any
+    ) -> VectorStoreRetriever:
+        collection = self._get_collection(
+            collection_name,
+            embedding_function=embedding_function,
+        )
+        retriever = collection.as_retriever(**kwargs)
+        return retriever
+
+    async def similarity_search_with_score(
+        self,
+        collection_name: str,
+        query: str,
+        k: int,
+        embedding_function: Embeddings,
+    ) -> List[tuple[VectorDocument, float]]:
+        """
+        Run similarity search with score
+        """
+        collection = self._get_collection(
+            collection_name,
+            embedding_function=embedding_function,
+        )
+        # using ainvoke would require wrapping, easier to call direct async method if available or sync in separate thread
+        # Chroma in langchain is weird about async. 
+        # langchain_chroma.Chroma.asimilarity_search_with_relevance_scores is available
+        
+        # We use relevance_scores to try to normalize to 0-1 (higher is better)
+        # This makes sorting easier across different collections if they use compatible metrics (e.g. cosine)
+        results = await collection.asimilarity_search_with_relevance_scores(
+            query=query,
+            k=k
+        )
+        return results
+    
+
+    async def add_documents(
+        self,
+        collection_name: str,
+        documents: List[VectorDocument],
+        embedding_function: Optional[Embeddings] = None,
+    ) -> None:
+        if not documents:
+            return
+
+        collection = self._get_collection(
+            collection_name,
+            embedding_function=embedding_function,
+        )
+
+        # Ensure each document has valid string content
+        for doc in documents:
+            if not isinstance(doc.page_content, str):
+                raise ValueError(f"Document content must be a string, got {type(doc.page_content)}")
+            if not doc.page_content.strip():
+                raise ValueError("Document content cannot be empty")
+
+        # Extract document IDs
+        ids = [doc.id for doc in documents]
+
+        try:
+            await collection.aadd_documents(
+                documents=documents,
+                ids=ids
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to add documents to Chroma collection %s: %s",
+                collection_name,
+                exc,
+            )
+            raise
+
+
+    async def delete_documents(
+        self,
+        collection_name: str,
+        ids: List[str],
+    ) -> None:
+        if not ids:
+            return
+
+        collection = self._get_collection(collection_name)
+
+        try:
+            await collection.adelete(ids=ids)
+        except Exception as exc:
+            logger.error(
+                "Failed to delete documents %s from Chroma collection %s: %s",
+                ids,
+                collection_name,
+                exc,
+            )
+            raise

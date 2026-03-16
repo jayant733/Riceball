@@ -1,0 +1,258 @@
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { Upload, Trash2 } from 'lucide-vue-next'
+import { Button } from '~/components/ui/button'
+import { toast } from 'vue-sonner'
+
+const { $api } = useNuxtApp()
+const { t } = useI18n()
+
+interface UploadProgress {
+  fileName: string
+  progress: number
+  status: 'uploading' | 'processing' | 'completed' | 'failed'
+}
+
+interface Props {
+  knowledgeBaseId: string
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+  'upload-complete': []
+}>()
+
+// State
+const selectedKbId = ref(props.knowledgeBaseId)
+const selectedFiles = ref<File[]>([])
+const uploading = ref(false)
+const uploadProgress = ref<UploadProgress[]>([])
+const fileInput = ref<HTMLInputElement>()
+const isDragging = ref(false)
+
+// Watch props changes
+watch(() => props.knowledgeBaseId, (newId) => {
+  selectedKbId.value = newId
+}, { immediate: true })
+
+// File selection
+const handleFileSelect = (event: Event) => {
+  const target = event.target as HTMLInputElement
+  if (target.files) {
+    const newFiles = Array.from(target.files)
+    selectedFiles.value.push(...newFiles)
+  }
+}
+
+// Drag and drop handlers
+const onDragOver = (e: DragEvent) => {
+  e.preventDefault()
+  isDragging.value = true
+}
+
+const onDragLeave = (e: DragEvent) => {
+  e.preventDefault()
+  isDragging.value = false
+}
+
+const onDrop = (e: DragEvent) => {
+  e.preventDefault()
+  isDragging.value = false
+  if (e.dataTransfer?.files) {
+    const newFiles = Array.from(e.dataTransfer.files)
+    selectedFiles.value.push(...newFiles)
+  }
+}
+
+// Remove file
+const removeFile = (index: number) => {
+  selectedFiles.value.splice(index, 1)
+}
+
+// Load knowledge base list
+// const loadKnowledgeBases = async () => {
+//   try {
+//     const response = await $api('/v1/admin/rag/knowledge-bases') as any
+//     knowledgeBases.value = response.items || response || []
+//   } catch (error) {
+//     console.error('Failed to load knowledge base list:', error)
+//     toast.error(t('components.fileUpload.loadKnowledgeBasesFailed'))
+//   }
+// }
+
+// Upload files
+const uploadFiles = async () => {
+  if (!selectedKbId.value || selectedFiles.value.length === 0) {
+    toast.error(t('components.fileUpload.selectKnowledgeBaseAndFiles'))
+    return
+  }
+
+  uploading.value = true
+  uploadProgress.value = selectedFiles.value.map(file => ({
+    fileName: file.name,
+    progress: 0,
+    status: 'uploading' as const
+  }))
+
+  try {
+    const { $api } = useNuxtApp()
+
+    for (let i = 0; i < selectedFiles.value.length; i++) {
+      const file = selectedFiles.value[i]
+      const progressItem = uploadProgress.value[i]
+
+      if (!file || !progressItem) continue
+
+      try {
+        // 1. Upload file
+        progressItem.status = 'uploading'
+        progressItem.progress = 0
+
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('file_type', 'document')
+
+        const uploadResponse: any = await $api('/v1/files/upload', {
+          method: 'POST',
+          body: formData
+        })
+
+        progressItem.progress = 50
+        progressItem.status = 'processing'
+
+        // 2. Add to knowledge base
+        await $api('/v1/admin/rag/documents/from-file', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            file_path: uploadResponse.file_path,
+            knowledge_base_id: selectedKbId.value,
+            title: file.name
+          })
+        })
+
+        progressItem.progress = 100
+        progressItem.status = 'completed'
+
+      } catch (error) {
+        console.error(`Failed to upload file ${file.name}:`, error)
+        progressItem.status = 'failed'
+        toast.error(t('components.fileUpload.uploadFileFailed', { name: file.name }))
+      }
+    }
+
+    // Check if there are successfully uploaded files
+    const successCount = uploadProgress.value.filter(p => p.status === 'completed').length
+    if (successCount > 0) {
+      toast.success(t('components.fileUpload.uploadSuccess', { count: successCount }))
+      emit('upload-complete')
+      
+      // Clear state
+      selectedFiles.value = []
+      uploadProgress.value = []
+    }
+
+  } finally {
+    uploading.value = false
+  }
+}
+
+</script>
+
+<template>
+  <div class="space-y-4">
+    <div
+      class="rounded-md transition-all duration-200 min-h-[200px] flex flex-col justify-center border-2 border-transparent"
+      :class="{ 'bg-primary/5 border-primary border-dashed': isDragging }"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
+    >
+      <div class="text-center">
+        <input
+          ref="fileInput"
+          type="file"
+          multiple
+          accept=".pdf,.txt,.md,.docx,.doc,.pptx,.xlsx,.xls"
+          class="hidden"
+          @change="handleFileSelect"
+        />
+        <div v-if="selectedFiles.length === 0">
+          <Upload class="mx-auto h-12 w-12 text-gray-400" />
+          <div class="mt-4">
+            <Button
+              variant="outline"
+              @click="fileInput?.click()"
+            >
+              {{ t('components.fileUpload.selectFiles') }}
+            </Button>
+            <p class="mt-2 text-sm text-gray-500">
+              {{ t('components.fileUpload.dragDropTip') }}
+            </p>
+            <p class="mt-1 text-xs text-gray-400">
+              {{ t('components.fileUpload.supportedFormats') }}
+            </p>
+          </div>
+        </div>
+        <div v-else>
+          <div class="space-y-2">
+            <div
+              v-for="(file, index) in selectedFiles"
+              :key="index"
+              class="flex items-center justify-between p-2 bg-gray-50 rounded"
+            >
+              <span class="text-sm">{{ file.name }}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                @click="removeFile(index)"
+              >
+                <Trash2 class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div class="mt-4 space-x-2">
+            <Button
+              variant="outline"
+              @click="fileInput?.click()"
+            >
+              {{ t('components.fileUpload.addMore') }}
+            </Button>
+            <Button
+              @click="uploadFiles"
+              :disabled="!selectedKbId || uploading"
+            >
+              <Upload class="h-4 w-4 mr-2" v-if="!uploading" />
+              <div class="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" v-else />
+              {{ uploading ? t('components.fileUpload.uploading') : t('components.fileUpload.startUpload') }}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload progress -->
+    <div v-if="uploadProgress.length > 0" class="space-y-2">
+      <h4 class="font-medium">{{ t('components.fileUpload.uploadProgress') }}</h4>
+      <div
+        v-for="progress in uploadProgress"
+        :key="progress.fileName"
+        class="space-y-1"
+      >
+        <div class="flex justify-between text-sm">
+          <span>{{ progress.fileName }}</span>
+          <span>{{ t(`components.fileUpload.status.${progress.status}`) }}</span>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2">
+          <div
+            class="bg-blue-600 h-2 rounded-full transition-all duration-300"
+            :style="{ width: `${progress.progress}%` }"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>

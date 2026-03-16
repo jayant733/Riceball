@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Tag Annotation
+        id: tag_data
+        run: |
+          # Ensure tags are fetched
+          git fetch origin +refs/tags/*:refs/tags/*
+          # Get tag annotation
+          TAG_MSG=$(git for-each-ref refs/tags/${{ github.ref_name }} --format='%(contents)')
+          # Support multiline output
+          echo "msg<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAG_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body: ${{ steps.tag_data.outputs.msg }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true

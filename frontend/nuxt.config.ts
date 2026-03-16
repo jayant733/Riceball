@@ -1,0 +1,102 @@
+// https://nuxt.com/docs/api/configuration/nuxt-config
+
+import tailwindcss from '@tailwindcss/vite'
+
+const appName = process.env.APP_NAME || 'RiceBall'
+
+export default defineNuxtConfig({
+  compatibilityDate: '2025-07-15',
+  devtools: { enabled: false },
+  ssr: false,
+  css: [
+    '~/assets/css/tailwind.css',
+    'katex/dist/katex.min.css'
+  ],
+  vite: {
+    plugins: [
+      tailwindcss(),
+    ],
+  },
+
+  runtimeConfig: {
+    public: {
+      appName: appName,
+    }
+  },
+
+  modules: [
+    'shadcn-nuxt',
+    '@pinia/nuxt',
+    '@nuxtjs/i18n',
+    '@nuxtjs/color-mode',
+    '@nuxt/scripts',
+    '@nuxt/content',
+    '@vite-pwa/nuxt'
+  ],
+
+  pwa: {
+    manifest: false, // Disable auto-generated manifest to use dynamic one
+    registerType: 'autoUpdate',
+    workbox: {
+      navigateFallback: '/',
+      // Prevent SW from handling API requests (OAuth callbacks are navigation requests)
+      navigateFallbackDenylist: [/^\/api\//],
+      // Optimization: Only precache essential files (JS, CSS, HTML)
+      // Exclude images, fonts, and media to reduce initial bandwidth usage
+      globPatterns: ['**/*.{js,css,html}'],
+      // Optional: Clean up old caches automatically
+      cleanupOutdatedCaches: true,
+    },
+    devOptions: {
+      enabled: false,
+      type: 'module',
+    },
+  },
+
+  content: {
+    experimental: { sqliteConnector: 'native' },
+  },
+  
+  colorMode: {
+    classSuffix: ''
+  },
+
+  shadcn: {
+    /**
+     * Prefix for all the imported component
+     */
+    prefix: '',
+    /**
+     * Directory that the component lives in.
+     * @default "./components/ui"
+     */
+    componentDir: './app/components/ui'
+  },
+
+  nitro: {
+    routeRules: {
+      '/api/**': { proxy: (process.env.API_BASE_URL || 'http://localhost:8000') + '/api/**' },
+    },
+    // Explicitly configure devProxy to ensure stable proxying in development
+    // devProxy: {
+    //   '/api': {
+    //     target: process.env.API_BASE_URL || 'http://localhost:8000',
+    //     changeOrigin: true,
+    //   }
+    // }
+  },
+
+  i18n: {
+    defaultLocale: 'en',
+    detectBrowserLanguage: {
+      useCookie: true,
+      cookieKey: 'i18n_redirected',
+      redirectOn: 'root' // recommended
+    },
+    strategy: 'no_prefix',
+    locales: [
+      { code: 'en', name: 'English', language: 'en-US', file: 'en.ts' },
+      { code: 'zh-Hans', name: '简体中文', language: 'zh-Hans', file: 'zh-Hans.ts' }
+    ]
+  }
+})
